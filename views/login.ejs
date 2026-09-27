@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= title %> · StudyLog</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="auth-body">
+  <main class="auth-card">
+    <div class="auth-badge">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21c0-5 3-8 8-9-1 6-3 9-8 9Z"/><path d="M12 21c0-6-3.5-10-9-11 1 7 4 11 9 11Z"/><path d="M12 21v-6"/></svg>
+    </div>
+    <h1 class="auth-title">StudyLog</h1>
+    <p class="auth-subtitle">おかえりなさい。ログインして続けましょう。</p>
+    <% if (error) { %><p class="form-error"><%= error %></p><% } %>
+    <form method="post" action="/login" class="stack-form">
+      <label>Username
+        <input type="text" name="username" autocomplete="username" required autofocus>
+      </label>
+      <label>Password
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit" class="primary-button">Log in</button>
+    </form>
+    <p class="auth-footnote"><a href="/forgot-password">パスワードを忘れた場合</a></p>
+  </main>
+</body>
+</html>

@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= title %></title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <%- include('nav', { user: user, active: active }) %>
+
+  <main class="page">
+    <h1 class="page-title">Grass</h1>
+    <p class="page-subtitle">continue the streak, gently.</p>
+
+    <% if (!rateGoals || rateGoals.length === 0) { %>
+    <section class="empty-state">
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21c0-5 3-8 8-9-1 6-3 9-8 9Z"/><path d="M12 21c0-6-3.5-10-9-11 1 7 4 11 9 11Z"/><path d="M12 21v-6"/></svg>
+      <p>Grass に表示できる目標がまだありません。</p>
+      <p class="muted">まず <a href="/goals">Goals</a> で「1日あたりの目標時間」を持つ Goal を作成してください(例: Mathematics — 60 min/day)。</p>
+    </section>
+    <% } else { %>
+    <section class="grass-header">
+      <div class="goal-select-wrap">
+        <label for="goal-select" class="muted small-label">Goal</label>
+        <select id="goal-select">
+          <% rateGoals.forEach(function(g) { %>
+          <option value="<%= g.id %>" data-target="<%= g.targetValue %>" data-unit="<%= g.targetUnit %>"><%= g.title %></option>
+          <% }); %>
+        </select>
+      </div>
+      <div class="year-select-wrap">
+        <label for="year-select" class="muted small-label">Year</label>
+        <select id="year-select"></select>
+      </div>
+      <span id="streak-badge" class="streak-badge" hidden>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21c0-5 3-8 8-9-1 6-3 9-8 9Z"/><path d="M12 21c0-6-3.5-10-9-11 1 7 4 11 9 11Z"/></svg>
+        <span id="streak-badge-text"></span>
+      </span>
+    </section>
+
+    <section id="grass-container" class="grass-container" aria-live="polite">
+      <p class="muted">Loading…</p>
+    </section>
+
+    <section class="today-summary">
+      <h2 class="section-title">Today · <%= today %></h2>
+      <div id="today-summary-list" class="today-list">
+        <p class="muted">Loading…</p>
+      </div>
+    </section>
+    <% } %>
+  </main>
+
+  <dialog id="day-dialog" class="day-dialog">
+    <form method="dialog" class="day-dialog-form">
+      <header class="day-dialog-header">
+        <h2 id="day-dialog-date">Date</h2>
+        <button type="submit" class="icon-button" aria-label="Close">×</button>
+      </header>
+
+      <div id="day-existing-sessions" class="existing-sessions"></div>
+
+      <div class="add-session-form">
+        <h3 class="add-session-title">Add a session</h3>
+        <div class="form-row">
+          <label>Goal
+            <select id="session-goal"></select>
+          </label>
+          <label>Subject
+            <input type="text" id="session-subject" placeholder="例: Calculus">
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Duration (min)
+            <input type="number" id="session-duration" min="0" step="1" placeholder="60">
+          </label>
+        </div>
+        <label class="full-width">Description <span class="muted">(optional)</span>
+          <textarea id="session-description" rows="3" placeholder="今日勉強した内容を自由に書いてください"></textarea>
+        </label>
+        <p id="session-form-error" class="form-error" hidden></p>
+        <button type="button" id="session-save" class="primary-button">Save session</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+    window.STUDYLOG_USER_ID = "<%= user.id %>";
+  </script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
