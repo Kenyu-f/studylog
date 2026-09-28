@@ -1,8 +1,11 @@
 # StudyLog (TypeScript edition) — explanation.md
 
 This is a TypeScript/Node.js port of the original Go implementation of
-StudyLog, done to deploy on Deplexo (a Docker-based Node/TS-friendly
-platform). It is a **feature-complete rewrite**, not a thin wrapper: same
+StudyLog. **This revision targets Vercel** (serverless functions +
+Neon Postgres); see "Adapting for Vercel" at the bottom for exactly what
+changed from the earlier Deplexo/SQLite revision and why. Sections 8, 13
+and 14 below describe that earlier revision and are superseded by the
+Vercel section where they conflict. It is a **feature-complete rewrite**, not a thin wrapper: same
 data model, same Grass math, same auth/recovery-code design, same
 "academic x cute-core" UI — reimplemented in TypeScript because that's
 what this deployment target expects. If you have the original Go
@@ -45,7 +48,7 @@ step for the frontend (only the *backend* TypeScript needs compiling).
 | Language | TypeScript, compiled with `tsc` | Deployment target expects a TypeScript/Node project. |
 | HTTP framework | Express | The de facto standard for Node HTTP servers -- unlike the Go version (which had Go 1.22's pattern-matching router built into its stdlib), plain Node's `http` module has no path-parameter routing at all, so hand-rolling one would be *less* readable than using the one framework every Node developer already knows. This is the one framework-level dependency in the whole stack. |
 | Templates | EJS | Plays the same role `html/template` played in the Go version: server-side HTML generation with `<%= %>` interpolation (auto-escaped by default, same safety property as Go's contextual autoescaping -- see section 12). |
-| Database | Real SQLite, via Node's built-in `node:sqlite` | See Decision D1' below -- this is the one thing the Go version explicitly could *not* do (Decision D1 in the Go `explanation.md`), and this port fixes it, with zero extra dependencies. |
+| Database | **Neon serverless Postgres** (`@neondatabase/serverless`) -- earlier revision used `node:sqlite`, superseded, see "Adapting for Vercel" | See Decision D1' below -- this is the one thing the Go version explicitly could *not* do (Decision D1 in the Go `explanation.md`), and this port fixes it, with zero extra dependencies. |
 | Frontend | Vanilla HTML/CSS/JS, copied over unchanged from the Go version | See section 4 -- no reason to touch working, already-debugged files. |
 | Auth | Same design as the Go version: salted+stretched SHA-256 (via Node's built-in `crypto`), recovery-code password reset | See section 10. |
 
@@ -297,3 +300,104 @@ weekly Grass visualization, real password hashing for public deployment,
 session-editing UI), plus one Node-specific item: swapping `node:sqlite`
 for `better-sqlite3` if the "experimental" label in section 8 ever
 becomes a real concern rather than a startup-log warning.
+
+
+---
+
+## Adapting for Vercel
+
+### Why the earlier version could not run on Vercel
+
+The earlier revision (Express `app.listen()` + a local SQLite file) assumed
+**one long-lived process with a disk that persists**. Vercel provides
+neither: each request runs in a short-lived serverless function whose only
+writable location is an ephemeral `/tmp`. A study session written to a
+local file would simply vanish. TypeScript itself was never the problem --
+the *architecture* was.
+
+### What changed
+
+| Concern | Before | Now |
+|---|---|---|
+| Storage | `node:sqlite`, local file, synchronous | **Neon Postgres over HTTP**, `src/db.ts`, every method `async` |
+| Entry point | `src/server.ts` calls `app.listen()` | `api/index.ts` default-exports a handler; Vercel calls it per request. `src/server.ts` remains for local dev/Docker |
+| Routing | Express routes | **Unchanged.** `vercel.json` rewrites every path to the one function and Express routes internally |
+| Handlers | synchronous | `async`, with an `asyncHandler` wrapper forwarding rejections to Express's error handler (Express 4 does not catch async errors itself) |
+| Static/views | read from disk beside the code | Same, resolved from `process.cwd()`; `vercel.json` `includeFiles` bundles `views/` and `public/` into the function |
+| Config | `PORT`, `DATA_PATH` | `DATABASE_URL` (required) |
+
+Deliberately *not* changed: Grass math, goal tree, auth, recovery codes,
+all EJS views, and the whole frontend (`public/`). That is why the
+month-label fix (`d.getDate() === 1`) and the `[hidden]` CSS fix are
+still in place.
+
+**Why Neon's HTTP driver rather than plain `pg`.** A TCP connection pool
+per cold-started function instance can exhaust a database's connection
+limit under serverless scaling. `@neondatabase/serverless` sends each
+query as an HTTP request, so there is no connection to hold open.
+
+**Concurrency note.** The synchronous SQLite version could not interleave
+requests. Postgres can. The one place this matters: `/setup` checks
+`anyGroupExists()` then inserts; two simultaneous first-run submissions
+could in theory both pass the check. For a private two-person app that is
+acceptable, and the `username UNIQUE` constraint still prevents duplicate
+accounts.
+
+**Cold-start cost.** `Store.init()` runs the idempotent
+`CREATE TABLE IF NOT EXISTS` statements once per function instance (cached
+in a module-level promise in `api/index.ts`). It costs a few round-trips on
+a cold start and nothing on warm requests.
+
+### Testing without a Neon account
+
+`Store` takes either a connection string or a `SqlFn` (a tagged template
+returning rows). `test/run.ts` passes an adapter over **PGlite**
+(Postgres compiled to WASM, in-process), boots the real Express app, and
+drives it over HTTP: setup, login, goal tree, session sums, Grass ratio and
+the intensity cap, cumulative progress, partner permissions, password
+recovery, XSS escaping. `npm test` runs it; no network needed. It proves
+the SQL is valid Postgres and the handlers work with the async store. What
+it cannot prove is Vercel's own runtime behaviour -- that is only
+verifiable by deploying.
+
+### Deploying to Vercel
+
+1. Push this project to GitHub.
+2. Vercel dashboard -> **Add New -> Project** -> import the repo. Leave the
+   framework preset as "Other"; no build settings are needed
+   (`vercel.json` is enough, and Vercel compiles `api/index.ts` itself).
+3. Before or after the first deploy: project -> **Storage** -> create a
+   **Neon** Postgres database from the Marketplace and connect it to the
+   project. This injects the connection string as an environment variable.
+   Confirm under **Settings -> Environment Variables** that `DATABASE_URL`
+   exists; if the integration named it differently (e.g. `POSTGRES_URL`),
+   add `DATABASE_URL` with the same value.
+4. Redeploy so the function sees the variable, then open the
+   `*.vercel.app` URL. You should land on `/setup`; tables are created
+   automatically on the first request.
+5. Save the two recovery codes shown after setup.
+
+Tip for a Japan-based user: pick a Neon region near Tokyo
+(`aws-ap-northeast-1`) and set the Vercel function region to Tokyo
+(Project Settings -> Functions -> Function Region, `hnd1`). Every request
+makes several database round-trips, so keeping app and database in the
+same region matters far more than either one's raw speed.
+
+**Local run:** `export DATABASE_URL=...` (a free Neon database works fine
+for development), `npm install`, `npm run dev`.
+
+**Cost:** Vercel Hobby and Neon's free tier are both $0, subject to their
+current terms (Hobby is for non-commercial use). Check both pricing pages
+before relying on this, since free-tier limits change.
+
+### Known limitations
+
+- Not verified on a live Vercel deployment from this environment (no
+  network access to Vercel/Neon here) -- the app and SQL are verified
+  end-to-end locally; the `vercel.json`/`api/index.ts` wiring follows
+  Vercel's documented Express-on-Functions pattern but a first deploy is the
+  real test. If it fails, the function logs in the Vercel dashboard will
+  show whether it is a missing `DATABASE_URL`, missing bundled files
+  (`includeFiles`), or something else.
+- Password hashing still uses stretched SHA-256 (see section 10), and login
+  has no rate limiting -- unchanged from earlier revisions.

@@ -1,21 +1,31 @@
-// Entry point. See explanation.md for the full design writeup.
+// Local development / Docker entry point (a long-running server).
+// On Vercel this file is NOT used -- see api/index.ts instead.
 //
-//   npm install
+//   export DATABASE_URL="postgresql://...neon.tech/...?sslmode=require"
 //   npm run build && npm start
 //   open http://localhost:8080
-//
-// Cloud deployment: reads $PORT / $DATA_PATH, same convention as the Go
-// version, so it works unmodified on Railway/Fly/Deplexo/etc.
 
 import { createApp } from "./app";
 import { Store } from "./db";
 
-const port = process.env.PORT ?? "8080";
-const dataPath = process.env.DATA_PATH ?? "data/studylog.db";
+async function main(): Promise<void> {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    console.error("DATABASE_URL is not set. Create a free Neon Postgres database and export its connection string.");
+    process.exit(1);
+  }
+  const port = Number(process.env.PORT ?? "8080");
 
-const store = new Store(dataPath);
-const app = createApp(store);
+  const store = new Store(databaseUrl);
+  await store.init();
+  const app = createApp(store);
 
-app.listen(Number(port), () => {
-  console.log(`StudyLog listening on :${port} (data file: ${dataPath})`);
+  app.listen(port, () => {
+    console.log(`StudyLog listening on :${port}`);
+  });
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
 });

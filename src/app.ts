@@ -1,7 +1,10 @@
-// HTTP layer -- port of the Go version's internal/handlers/handlers.go.
-// Express + EJS play the role html/template + net/http's ServeMux played
-// there. Route table, auth middleware, and every handler are grouped
-// here, same organization as the Go file, for easy side-by-side reading.
+// HTTP layer -- Vercel edition. Same route table and handler logic as
+// the Deplexo version, with one structural change throughout: every
+// handler is now `async` and every store call is `await`ed, since
+// src/db.ts's Neon-backed Store is Promise-based (see explanation.md,
+// "Adapting for Vercel"). An `asyncHandler` wrapper forwards rejected
+// promises to Express's error handler, since Express 4 doesn't do this
+// automatically for async route handlers.
 
 import express, { Request, Response, NextFunction } from "express";
 import path from "path";
@@ -15,6 +18,14 @@ const SESSION_COOKIE = "studylog_session";
 
 function newId(prefix: string): string {
   return `${prefix}_${crypto.randomBytes(8).toString("hex")}`;
+}
+
+type AsyncRouteHandler = (req: Request, res: Response, next: NextFunction) => Promise<void>;
+
+function asyncHandler(fn: AsyncRouteHandler) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    fn(req, res, next).catch(next);
+  };
 }
 
 // ---------- tiny cookie helpers (no cookie-parser dependency) ----------
@@ -32,7 +43,7 @@ function parseCookies(req: Request): Record<string, string> {
 }
 
 function setSessionCookie(res: Response, token: string): void {
-  const maxAge = 60 * 60 * 24 * 90; // 90 days, matches the Go version
+  const maxAge = 60 * 60 * 24 * 90; // 90 days
   res.append("Set-Cookie", `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`);
 }
 
@@ -43,222 +54,243 @@ function clearSessionCookie(res: Response): void {
 export function createApp(store: Store): express.Express {
   const app = express();
   app.set("view engine", "ejs");
-  app.set("views", path.join(__dirname, "..", "views"));
+  app.set("views", path.join(process.cwd(), "views"));
 
-  app.use(express.urlencoded({ extended: false })); // HTML <form> posts
-  app.use(express.json()); // JSON API bodies
-  app.use("/static", express.static(path.join(__dirname, "..", "public")));
+  app.use(express.urlencoded({ extended: false }));
+  app.use(express.json());
+  app.use("/static", express.static(path.join(process.cwd(), "public")));
 
   // ---------- auth plumbing ----------
 
-  function currentUser(req: Request): User | null {
+  async function currentUser(req: Request): Promise<User | null> {
     const token = parseCookies(req)[SESSION_COOKIE];
     if (!token) return null;
-    const userId = store.userIdForToken(token);
+    const userId = await store.userIdForToken(token);
     if (!userId) return null;
     try {
-      return store.userById(userId);
+      return await store.userById(userId);
     } catch {
       return null;
     }
   }
 
-  function withAuth(next: (req: Request, res: Response, user: User) => void) {
-    return (req: Request, res: Response) => {
-      if (!store.anyGroupExists()) {
+  function withAuth(next: (req: Request, res: Response, user: User) => Promise<void>) {
+    return asyncHandler(async (req, res) => {
+      if (!(await store.anyGroupExists())) {
         res.redirect("/setup");
         return;
       }
-      const u = currentUser(req);
+      const u = await currentUser(req);
       if (!u) {
         res.redirect("/login");
         return;
       }
-      next(req, res, u);
-    };
+      await next(req, res, u);
+    });
   }
 
-  function withAuthJson(next: (req: Request, res: Response, user: User) => void) {
-    return (req: Request, res: Response) => {
-      const u = currentUser(req);
+  function withAuthJson(next: (req: Request, res: Response, user: User) => Promise<void>) {
+    return asyncHandler(async (req, res) => {
+      const u = await currentUser(req);
       if (!u) {
         res.status(401).json({ error: "not authenticated" });
         return;
       }
-      next(req, res, u);
-    };
+      await next(req, res, u);
+    });
   }
 
   // ---------- setup (first run) ----------
 
-  app.get("/setup", (req, res) => {
-    if (store.anyGroupExists()) {
-      res.redirect("/login");
-      return;
-    }
-    res.render("setup", { title: "Set up StudyLog", error: null });
-  });
+  app.get(
+    "/setup",
+    asyncHandler(async (req, res) => {
+      if (await store.anyGroupExists()) {
+        res.redirect("/login");
+        return;
+      }
+      res.render("setup", { title: "Set up StudyLog", error: null });
+    })
+  );
 
-  app.post("/setup", (req, res) => {
-    if (store.anyGroupExists()) {
-      res.redirect("/login");
-      return;
-    }
-    const b = req.body as Record<string, string>;
-    const groupName = b.groupName ?? "";
-    const specs = [
-      { display: b.user1DisplayName ?? "", username: b.user1Username ?? "", password: b.user1Password ?? "" },
-      { display: b.user2DisplayName ?? "", username: b.user2Username ?? "", password: b.user2Password ?? "" },
-    ];
-    if (!groupName || specs.some((s) => !s.username || !s.password)) {
-      res.render("setup", { title: "Set up StudyLog", error: "全ての必須項目を入力してください。" });
-      return;
-    }
+  app.post(
+    "/setup",
+    asyncHandler(async (req, res) => {
+      if (await store.anyGroupExists()) {
+        res.redirect("/login");
+        return;
+      }
+      const b = req.body as Record<string, string>;
+      const groupName = b.groupName ?? "";
+      const specs = [
+        { display: b.user1DisplayName ?? "", username: b.user1Username ?? "", password: b.user1Password ?? "" },
+        { display: b.user2DisplayName ?? "", username: b.user2Username ?? "", password: b.user2Password ?? "" },
+      ];
+      if (!groupName || specs.some((s) => !s.username || !s.password)) {
+        res.render("setup", { title: "Set up StudyLog", error: "全ての必須項目を入力してください。" });
+        return;
+      }
 
-    const group = { id: newId("grp"), name: groupName, createdAt: new Date().toISOString() };
-    store.createGroup(group);
+      const group = { id: newId("grp"), name: groupName, createdAt: new Date().toISOString() };
+      await store.createGroup(group);
 
-    const items: { label: string; code: string }[] = [];
-    for (const spec of specs) {
-      const salt = authutil.newSalt();
-      const recoveryCode = authutil.newRecoveryCode();
-      const recoverySalt = authutil.newSalt();
-      const displayName = spec.display || spec.username;
-      const user: User = {
-        id: newId("usr"),
-        username: spec.username,
-        displayName,
-        passwordHash: authutil.hashPassword(spec.password, salt),
-        salt,
-        recoveryCodeHash: authutil.hashPassword(recoveryCode, recoverySalt),
-        recoveryCodeSalt: recoverySalt,
-        groupId: group.id,
-        createdAt: new Date().toISOString(),
-      };
-      store.createUser(user);
-      items.push({ label: `${displayName} (${user.username})`, code: recoveryCode });
-    }
+      const items: { label: string; code: string }[] = [];
+      for (const spec of specs) {
+        const salt = authutil.newSalt();
+        const recoveryCode = authutil.newRecoveryCode();
+        const recoverySalt = authutil.newSalt();
+        const displayName = spec.display || spec.username;
+        const user: User = {
+          id: newId("usr"),
+          username: spec.username,
+          displayName,
+          passwordHash: authutil.hashPassword(spec.password, salt),
+          salt,
+          recoveryCodeHash: authutil.hashPassword(recoveryCode, recoverySalt),
+          recoveryCodeSalt: recoverySalt,
+          groupId: group.id,
+          createdAt: new Date().toISOString(),
+        };
+        await store.createUser(user);
+        items.push({ label: `${displayName} (${user.username})`, code: recoveryCode });
+      }
 
-    res.render("recovery-codes", {
-      title: "Save your recovery codes",
-      heading: "リカバリーコードを保存してください",
-      subtitle:
-        "パスワードを忘れた場合、このコードだけが再設定の手段になります。メール機能は無いため、二人ともスクリーンショットやメモアプリに保存しておくことを強くおすすめします。",
-      items,
-      nextUrl: "/login",
-      nextLabel: "保存しました。ログインへ進む",
-    });
-  });
+      res.render("recovery-codes", {
+        title: "Save your recovery codes",
+        heading: "リカバリーコードを保存してください",
+        subtitle:
+          "パスワードを忘れた場合、このコードだけが再設定の手段になります。メール機能は無いため、二人ともスクリーンショットやメモアプリに保存しておくことを強くおすすめします。",
+        items,
+        nextUrl: "/login",
+        nextLabel: "保存しました。ログインへ進む",
+      });
+    })
+  );
 
   // ---------- login/logout ----------
 
-  app.get("/login", (req, res) => {
-    if (!store.anyGroupExists()) {
-      res.redirect("/setup");
-      return;
-    }
-    if (currentUser(req)) {
+  app.get(
+    "/login",
+    asyncHandler(async (req, res) => {
+      if (!(await store.anyGroupExists())) {
+        res.redirect("/setup");
+        return;
+      }
+      if (await currentUser(req)) {
+        res.redirect("/");
+        return;
+      }
+      res.render("login", { title: "Log in", error: null });
+    })
+  );
+
+  app.post(
+    "/login",
+    asyncHandler(async (req, res) => {
+      const { username, password } = req.body as Record<string, string>;
+      let user: User;
+      try {
+        user = await store.userByUsername(username ?? "");
+      } catch {
+        res.render("login", { title: "Log in", error: "ユーザー名またはパスワードが違います。" });
+        return;
+      }
+      if (!authutil.verifyPassword(password ?? "", user.salt, user.passwordHash)) {
+        res.render("login", { title: "Log in", error: "ユーザー名またはパスワードが違います。" });
+        return;
+      }
+      const token = authutil.newSessionToken();
+      await store.putToken(token, user.id);
+      setSessionCookie(res, token);
       res.redirect("/");
-      return;
-    }
-    res.render("login", { title: "Log in", error: null });
-  });
+    })
+  );
 
-  app.post("/login", (req, res) => {
-    const { username, password } = req.body as Record<string, string>;
-    let user: User;
-    try {
-      user = store.userByUsername(username ?? "");
-    } catch {
-      res.render("login", { title: "Log in", error: "ユーザー名またはパスワードが違います。" });
-      return;
-    }
-    if (!authutil.verifyPassword(password ?? "", user.salt, user.passwordHash)) {
-      res.render("login", { title: "Log in", error: "ユーザー名またはパスワードが違います。" });
-      return;
-    }
-    const token = authutil.newSessionToken();
-    store.putToken(token, user.id);
-    setSessionCookie(res, token);
-    res.redirect("/");
-  });
-
-  app.post("/logout", (req, res) => {
-    const token = parseCookies(req)[SESSION_COOKIE];
-    if (token) store.deleteToken(token);
-    clearSessionCookie(res);
-    res.redirect("/login");
-  });
+  app.post(
+    "/logout",
+    asyncHandler(async (req, res) => {
+      const token = parseCookies(req)[SESSION_COOKIE];
+      if (token) await store.deleteToken(token);
+      clearSessionCookie(res);
+      res.redirect("/login");
+    })
+  );
 
   // ---------- forgot password ----------
 
-  app.get("/forgot-password", (req, res) => {
-    if (!store.anyGroupExists()) {
-      res.redirect("/setup");
-      return;
-    }
-    res.render("forgot-password", { title: "Reset password", error: null, username: "" });
-  });
+  app.get(
+    "/forgot-password",
+    asyncHandler(async (req, res) => {
+      if (!(await store.anyGroupExists())) {
+        res.redirect("/setup");
+        return;
+      }
+      res.render("forgot-password", { title: "Reset password", error: null, username: "" });
+    })
+  );
 
-  app.post("/forgot-password", (req, res) => {
-    const b = req.body as Record<string, string>;
-    const username = b.username ?? "";
-    const recoveryCode = (b.recoveryCode ?? "").trim().toUpperCase();
-    const newPassword = b.newPassword ?? "";
-    const confirmPassword = b.confirmPassword ?? "";
+  app.post(
+    "/forgot-password",
+    asyncHandler(async (req, res) => {
+      const b = req.body as Record<string, string>;
+      const username = b.username ?? "";
+      const recoveryCode = (b.recoveryCode ?? "").trim().toUpperCase();
+      const newPassword = b.newPassword ?? "";
+      const confirmPassword = b.confirmPassword ?? "";
 
-    const fail = (msg: string) => res.render("forgot-password", { title: "Reset password", error: msg, username });
+      const fail = (msg: string) => res.render("forgot-password", { title: "Reset password", error: msg, username });
 
-    if (!newPassword || newPassword !== confirmPassword) {
-      fail("新しいパスワードが一致しません。");
-      return;
-    }
-    if (newPassword.length < 8) {
-      fail("パスワードは8文字以上にしてください。");
-      return;
-    }
+      if (!newPassword || newPassword !== confirmPassword) {
+        fail("新しいパスワードが一致しません。");
+        return;
+      }
+      if (newPassword.length < 8) {
+        fail("パスワードは8文字以上にしてください。");
+        return;
+      }
 
-    let user: User;
-    try {
-      user = store.userByUsername(username);
-    } catch {
-      fail("ユーザー名またはリカバリーコードが正しくありません。");
-      return;
-    }
-    if (!user.recoveryCodeHash || !authutil.verifyPassword(recoveryCode, user.recoveryCodeSalt, user.recoveryCodeHash)) {
-      fail("ユーザー名またはリカバリーコードが正しくありません。");
-      return;
-    }
+      let user: User;
+      try {
+        user = await store.userByUsername(username);
+      } catch {
+        fail("ユーザー名またはリカバリーコードが正しくありません。");
+        return;
+      }
+      if (!user.recoveryCodeHash || !authutil.verifyPassword(recoveryCode, user.recoveryCodeSalt, user.recoveryCodeHash)) {
+        fail("ユーザー名またはリカバリーコードが正しくありません。");
+        return;
+      }
 
-    const newSalt = authutil.newSalt();
-    const newRecoveryCode = authutil.newRecoveryCode();
-    const newRecoverySalt = authutil.newSalt();
-    user.passwordHash = authutil.hashPassword(newPassword, newSalt);
-    user.salt = newSalt;
-    user.recoveryCodeHash = authutil.hashPassword(newRecoveryCode, newRecoverySalt);
-    user.recoveryCodeSalt = newRecoverySalt;
-    store.updateUser(user);
+      const newSalt = authutil.newSalt();
+      const newRecoveryCode = authutil.newRecoveryCode();
+      const newRecoverySalt = authutil.newSalt();
+      user.passwordHash = authutil.hashPassword(newPassword, newSalt);
+      user.salt = newSalt;
+      user.recoveryCodeHash = authutil.hashPassword(newRecoveryCode, newRecoverySalt);
+      user.recoveryCodeSalt = newRecoverySalt;
+      await store.updateUser(user);
 
-    res.render("recovery-codes", {
-      title: "New recovery code",
-      heading: "パスワードを再設定しました",
-      subtitle: "念のため、リカバリーコードも新しいものに更新しました。古いコードはもう使えません。新しいコードを保存してください。",
-      items: [{ label: `${user.displayName} (${user.username})`, code: newRecoveryCode }],
-      nextUrl: "/login",
-      nextLabel: "保存しました。ログインへ進む",
-    });
-  });
+      res.render("recovery-codes", {
+        title: "New recovery code",
+        heading: "パスワードを再設定しました",
+        subtitle: "念のため、リカバリーコードも新しいものに更新しました。古いコードはもう使えません。新しいコードを保存してください。",
+        items: [{ label: `${user.displayName} (${user.username})`, code: newRecoveryCode }],
+        nextUrl: "/login",
+        nextLabel: "保存しました。ログインへ進む",
+      });
+    })
+  );
 
   // ---------- pages ----------
 
   app.get(
     "/",
-    withAuth((req, res, u) => {
-      const goalsList = store.goalsInGroup(u.groupId);
+    withAuth(async (req, res, u) => {
+      const goalsList = await store.goalsInGroup(u.groupId);
       const rateGoals = goalsList
         .filter((g) => g.progressMode === "rate" && g.targetPeriod === "day" && g.targetValue > 0)
         .sort((a, b) => a.title.localeCompare(b.title));
-      const partners = store.usersInGroup(u.groupId);
+      const partners = await store.usersInGroup(u.groupId);
 
       res.render("dashboard", {
         title: "StudyLog",
@@ -273,11 +305,11 @@ export function createApp(store: Store): express.Express {
 
   app.get(
     "/goals",
-    withAuth((req, res, u) => {
-      const goalsList = store.goalsInGroup(u.groupId);
-      const sessions = store.sessionsInGroup(u.groupId);
+    withAuth(async (req, res, u) => {
+      const goalsList = await store.goalsInGroup(u.groupId);
+      const sessions = await store.sessionsInGroup(u.groupId);
       const tree = grassLib.sortGoalsForTree(goalsList);
-      const partners = store.usersInGroup(u.groupId);
+      const partners = await store.usersInGroup(u.groupId);
       const nameById = new Map(partners.map((p) => [p.id, p.displayName]));
 
       const rows = tree.map((n) => ({
@@ -307,14 +339,14 @@ export function createApp(store: Store): express.Express {
 
   app.get(
     "/api/goals",
-    withAuthJson((req, res, u) => {
-      res.json(store.goalsInGroup(u.groupId));
+    withAuthJson(async (req, res, u) => {
+      res.json(await store.goalsInGroup(u.groupId));
     })
   );
 
   app.post(
     "/api/goals",
-    withAuthJson((req, res, u) => {
+    withAuthJson(async (req, res, u) => {
       const inBody = req.body as GoalInput;
       if (!inBody.title) {
         res.status(400).json({ error: "title is required" });
@@ -339,17 +371,17 @@ export function createApp(store: Store): express.Express {
         createdAt: now,
         updatedAt: now,
       };
-      store.createGoal(goal);
+      await store.createGoal(goal);
       res.status(201).json(goal);
     })
   );
 
   app.put(
     "/api/goals/:id",
-    withAuthJson((req, res, u) => {
+    withAuthJson(async (req, res, u) => {
       let existing: Goal;
       try {
-        existing = store.goalById(req.params.id);
+        existing = await store.goalById(req.params.id);
       } catch {
         res.status(404).json({ error: "goal not found" });
         return;
@@ -374,17 +406,17 @@ export function createApp(store: Store): express.Express {
         existing.ownerId = u.id;
       }
       existing.deadline = inBody.deadline || null;
-      store.updateGoal(existing);
+      await store.updateGoal(existing);
       res.json(existing);
     })
   );
 
   app.delete(
     "/api/goals/:id",
-    withAuthJson((req, res, u) => {
+    withAuthJson(async (req, res, u) => {
       let existing: Goal;
       try {
-        existing = store.goalById(req.params.id);
+        existing = await store.goalById(req.params.id);
       } catch {
         res.status(404).json({ error: "goal not found" });
         return;
@@ -393,11 +425,11 @@ export function createApp(store: Store): express.Express {
         res.status(404).json({ error: "goal not found" });
         return;
       }
-      if (store.childGoals(req.params.id).length > 0) {
+      if ((await store.childGoals(req.params.id)).length > 0) {
         res.status(409).json({ error: "delete or move child goals first" });
         return;
       }
-      store.deleteGoal(req.params.id);
+      await store.deleteGoal(req.params.id);
       res.status(204).end();
     })
   );
@@ -406,14 +438,14 @@ export function createApp(store: Store): express.Express {
 
   app.get(
     "/api/grass",
-    withAuthJson((req, res, u) => {
+    withAuthJson(async (req, res, u) => {
       const goalId = String(req.query.goalId ?? "");
       const start = String(req.query.start ?? "");
       const end = String(req.query.end ?? "");
 
       let goal: Goal;
       try {
-        goal = store.goalById(goalId);
+        goal = await store.goalById(goalId);
       } catch {
         res.status(404).json({ error: "goal not found" });
         return;
@@ -429,7 +461,7 @@ export function createApp(store: Store): express.Express {
         res.status(400).json({ error: "invalid start/end" });
         return;
       }
-      const sessions = store.sessionsInGroup(u.groupId);
+      const sessions = await store.sessionsInGroup(u.groupId);
       const cells = grassLib.buildCells(goal, sessions, dates);
       res.json({ goal, cells });
     })
@@ -439,30 +471,31 @@ export function createApp(store: Store): express.Express {
 
   app.get(
     "/api/day",
-    withAuthJson((req, res, u) => {
+    withAuthJson(async (req, res, u) => {
       const date = String(req.query.date ?? "");
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
         res.status(400).json({ error: "invalid date" });
         return;
       }
-      const sessions = store
-        .sessionsForDate(u.groupId, date)
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      const sessions = (await store.sessionsForDate(u.groupId, date)).sort((a, b) =>
+        a.createdAt.localeCompare(b.createdAt)
+      );
 
-      const partners = store.usersInGroup(u.groupId);
+      const partners = await store.usersInGroup(u.groupId);
       const nameById = new Map(partners.map((p) => [p.id, p.displayName]));
 
-      const out = sessions.map((s) => {
+      const out = [];
+      for (const s of sessions) {
         let goalTitle = "";
         if (s.goalId) {
           try {
-            goalTitle = store.goalById(s.goalId).title;
+            goalTitle = (await store.goalById(s.goalId)).title;
           } catch {
             /* goal may have been deleted; leave title blank */
           }
         }
-        return { ...s, userDisplayName: nameById.get(s.userId) ?? "", goalTitle };
-      });
+        out.push({ ...s, userDisplayName: nameById.get(s.userId) ?? "", goalTitle });
+      }
 
       res.json({ date, sessions: out });
     })
@@ -480,7 +513,7 @@ export function createApp(store: Store): express.Express {
 
   app.post(
     "/api/sessions",
-    withAuthJson((req, res, u) => {
+    withAuthJson(async (req, res, u) => {
       const inBody = req.body as SessionInput;
       if (!inBody.date || !/^\d{4}-\d{2}-\d{2}$/.test(inBody.date)) {
         res.status(400).json({ error: "invalid date" });
@@ -498,7 +531,7 @@ export function createApp(store: Store): express.Express {
       }
       if (inBody.goalId) {
         try {
-          const g = store.goalById(inBody.goalId);
+          const g = await store.goalById(inBody.goalId);
           if (g.groupId !== u.groupId) throw new NotFoundError();
         } catch {
           res.status(400).json({ error: "unknown goal" });
@@ -518,17 +551,17 @@ export function createApp(store: Store): express.Express {
         createdAt: now,
         updatedAt: now,
       };
-      store.createSession(session);
+      await store.createSession(session);
       res.status(201).json(session);
     })
   );
 
   app.put(
     "/api/sessions/:id",
-    withAuthJson((req, res, u) => {
+    withAuthJson(async (req, res, u) => {
       let existing: StudySession;
       try {
-        existing = store.sessionById(req.params.id);
+        existing = await store.sessionById(req.params.id);
       } catch {
         res.status(404).json({ error: "session not found" });
         return;
@@ -557,17 +590,17 @@ export function createApp(store: Store): express.Express {
       existing.subject = inBody.subject ?? "";
       existing.goalId = inBody.goalId ?? "";
       existing.description = description;
-      store.updateSession(existing);
+      await store.updateSession(existing);
       res.json(existing);
     })
   );
 
   app.delete(
     "/api/sessions/:id",
-    withAuthJson((req, res, u) => {
+    withAuthJson(async (req, res, u) => {
       let existing: StudySession;
       try {
-        existing = store.sessionById(req.params.id);
+        existing = await store.sessionById(req.params.id);
       } catch {
         res.status(404).json({ error: "session not found" });
         return;
@@ -580,13 +613,14 @@ export function createApp(store: Store): express.Express {
         res.status(403).json({ error: "cannot delete a partner's session" });
         return;
       }
-      store.deleteSession(req.params.id);
+      await store.deleteSession(req.params.id);
       res.status(204).end();
     })
   );
 
   app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
     console.error(err);
+    if (res.headersSent) return;
     res.status(500).json({ error: "internal error" });
   });
 
