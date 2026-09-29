@@ -315,7 +315,7 @@ export function createApp(store: Store): express.Express {
       const rows = tree.map((n) => ({
         node: n,
         progress: grassLib.computeProgress(n.goal, goalsList, sessions),
-        ownerTag: n.goal.shared ? "共有" : nameById.get(n.goal.ownerId) ?? "",
+        ownerTag: n.goal.shared ? "Shared" : nameById.get(n.goal.ownerId) ?? "",
       }));
 
       res.render("goals", { title: "Goals", active: "goals", user: u, rows, allGoals: goalsList });

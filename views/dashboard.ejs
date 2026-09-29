@@ -16,9 +16,8 @@
     <% if (!rateGoals || rateGoals.length === 0) { %>
     <section class="empty-state">
       <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21c0-5 3-8 8-9-1 6-3 9-8 9Z"/><path d="M12 21c0-6-3.5-10-9-11 1 7 4 11 9 11Z"/><path d="M12 21v-6"/></svg>
-      <p>Grass に表示できる目標がまだありません。</p>
-      <p class="muted">まず <a href="/goals">Goals</a> で「1日あたりの目標時間」を持つ Goal を作成してください(例: Mathematics — 60 min/day)。</p>
-    </section>
+      <p>There are no goals to display on Grass yet.</p>
+<p class="muted">First, create a Goal with a daily time target in <a href="/goals">Goals</a> (for example, Mathematics — 60 min/day).</p>    </section>
     <% } else { %>
     <section class="grass-header">
       <div class="goal-select-wrap">
@@ -52,7 +51,7 @@
       </div>
       <div class="today-entry-form">
         <label class="today-entry-input">
-          <span class="muted small-label">勉強時間を追加 (min)</span>
+          <span class="muted small-label">Add study time</span>
           <input type="number" id="today-minutes" min="1" step="1" inputmode="numeric" placeholder="30">
         </label>
         <div class="today-quick" role="group" aria-label="Quick add">
@@ -60,9 +59,9 @@
           <button type="button" class="chip-button" data-add="30">+30</button>
           <button type="button" class="chip-button" data-add="60">+60</button>
         </div>
-        <button type="button" id="today-add" class="primary-button">追加</button>
+        <button type="button" id="today-add" class="primary-button">Add</button>
       </div>
-      <p id="today-entry-hint" class="muted today-entry-hint">今日は何回でも追加できます。追加した分だけ今日のマスが濃くなります(このGoalの合計)。</p>
+      <p id="today-entry-hint" class="muted today-entry-hint">You can add entries as many times as you like today. The more you add, the darker today's square will become.</p>
       <p id="today-entry-error" class="form-error" hidden></p>
     </section>
 
