@@ -7,7 +7,7 @@
 // does the actual routing internally -- same route table as local.
 
 import type { IncomingMessage, ServerResponse } from "http";
-import { createApp } from "../src/studylog-app";
+import { createApp } from "../src/app";
 import { Store } from "../src/db";
 
 let appPromise: Promise<ReturnType<typeof createApp>> | null = null;

@@ -8,7 +8,7 @@
 import { PGlite } from "@electric-sql/pglite";
 import assert from "assert";
 import type { AddressInfo } from "net";
-import { createApp } from "../src/studylog-app";
+import { createApp } from "../src/app";
 import { Store, SqlFn } from "../src/db";
 
 async function main(): Promise<void> {

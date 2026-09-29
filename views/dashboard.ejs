@@ -39,12 +39,39 @@
       </span>
     </section>
 
+    <section id="today-entry" class="today-entry">
+      <div class="today-entry-top">
+        <div>
+          <div class="today-entry-label">Today · <span id="today-entry-date"><%= today %></span></div>
+          <div class="today-entry-progress">
+            <span id="today-entry-actual" class="today-entry-actual">0</span>
+            <span class="muted">/ <span id="today-entry-target">0</span> <span id="today-entry-unit">min</span></span>
+          </div>
+        </div>
+        <div class="today-entry-bar" aria-hidden="true"><div id="today-entry-fill" class="today-entry-fill"></div></div>
+      </div>
+      <div class="today-entry-form">
+        <label class="today-entry-input">
+          <span class="muted small-label">勉強時間を追加 (min)</span>
+          <input type="number" id="today-minutes" min="1" step="1" inputmode="numeric" placeholder="30">
+        </label>
+        <div class="today-quick" role="group" aria-label="Quick add">
+          <button type="button" class="chip-button" data-add="15">+15</button>
+          <button type="button" class="chip-button" data-add="30">+30</button>
+          <button type="button" class="chip-button" data-add="60">+60</button>
+        </div>
+        <button type="button" id="today-add" class="primary-button">追加</button>
+      </div>
+      <p id="today-entry-hint" class="muted today-entry-hint">今日は何回でも追加できます。追加した分だけ今日のマスが濃くなります(このGoalの合計)。</p>
+      <p id="today-entry-error" class="form-error" hidden></p>
+    </section>
+
     <section id="grass-container" class="grass-container" aria-live="polite">
       <p class="muted">Loading…</p>
     </section>
 
     <section class="today-summary">
-      <h2 class="section-title">Today · <%= today %></h2>
+      <h2 class="section-title">Today · <span id="today-heading-date"><%= today %></span></h2>
       <div id="today-summary-list" class="today-list">
         <p class="muted">Loading…</p>
       </div>

@@ -402,6 +402,19 @@ input:focus, select:focus, textarea:focus {
 }
 .grass-cell:hover { outline: 1.5px solid var(--pink-500); outline-offset: 1px; }
 .grass-cell.is-empty-slot { visibility: hidden; cursor: default; }
+/* today marker: a ring that stays visible even on an empty (white) cell */
+.grass-cell.is-today {
+  outline: 2px solid var(--pink-600);
+  outline-offset: 1px;
+  position: relative;
+}
+.grass-legend-today {
+  display: inline-flex; align-items: center; gap: 5px; margin-right: auto;
+}
+.grass-legend-today i {
+  width: 11px; height: 11px; border-radius: 3px; background: #fff;
+  border: 1px solid var(--border); outline: 2px solid var(--pink-600); outline-offset: 1px;
+}
 .grass-legend {
   display: flex;
   align-items: center;
@@ -549,3 +562,70 @@ dialog::backdrop { background: rgba(48, 42, 37, 0.35); }
 }
 .progress-bar-fill { height: 100%; background: var(--pink-400); border-radius: var(--radius-pill); }
 .progress-label { font-size: 11px; font-family: var(--font-mono); white-space: nowrap; color: var(--text-muted); }
+
+
+/* ---------- today entry (quick add under Goal / Year) ---------- */
+
+.today-entry {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-tiny);
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+.today-entry-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.today-entry-label { font-size: 12.5px; color: var(--text-muted); }
+.today-entry-progress { font-size: 14px; margin-top: 2px; }
+.today-entry-actual {
+  font-family: var(--font-serif, inherit);
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--pink-600);
+}
+.today-entry-bar {
+  flex: 1 1 180px;
+  max-width: 320px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--pink-50);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.today-entry-fill {
+  height: 100%;
+  width: 0;
+  background: var(--pink-400);
+  border-radius: var(--radius-pill);
+  transition: width .35s ease;
+}
+.today-entry-fill.is-done { background: var(--pink-600); }
+.today-entry-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.today-entry-input { flex: 0 1 190px; }
+.today-quick { display: flex; gap: 6px; }
+.chip-button {
+  border: 1px solid var(--border-strong);
+  background: #fff;
+  color: var(--pink-600);
+  border-radius: var(--radius-pill);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.chip-button:hover { background: var(--pink-50); border-color: var(--pink-300); }
+.today-entry-hint { font-size: 12.5px; margin-top: 10px; }
+.today-entry-error { margin-top: 10px; }
+.primary-button:disabled { opacity: .6; cursor: default; transform: none; }

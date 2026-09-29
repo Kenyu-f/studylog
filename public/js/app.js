@@ -28,6 +28,7 @@
   let currentGoalId = null;
   let currentYear = new Date().getFullYear();
   let selectedDate = null;
+  let didScrollToToday = false;
 
   function pinkForIntensity(intensity) {
     // intensity in [0,1]. Interpolate white -> strongest pink.
@@ -171,7 +172,9 @@
         const color = pinkForIntensity(cell.intensity);
         const pct = Math.round(cell.ratio * 100);
         const title = `${cell.date} — ${cell.actualMin} / ${cell.targetMin} min (${pct}%)`;
-        gridHTML += `<button class="grass-cell" style="background:${color}" data-date="${cell.date}" title="${title}"></button>`;
+        const todayCls = cell.date === fmtDate(new Date()) ? " is-today" : "";
+        const todayTitle = todayCls ? "【今日】 " + title : title;
+        gridHTML += `<button class="grass-cell${todayCls}" style="background:${color}" data-date="${cell.date}" title="${todayTitle}"></button>`;
       }
     }
 
@@ -183,6 +186,7 @@
           <div class="grass-grid">${gridHTML}</div>
         </div>
         <div class="grass-legend">
+          <span class="grass-legend-today"><i></i>Today</span>
           <span>Less</span>
           <span class="grass-legend-swatch" style="background:${pinkForIntensity(0)}"></span>
           <span class="grass-legend-swatch" style="background:${pinkForIntensity(0.25)}"></span>
@@ -196,6 +200,15 @@
     grassContainer.querySelectorAll(".grass-cell[data-date]").forEach((btn) => {
       btn.addEventListener("click", () => openDayDialog(btn.dataset.date));
     });
+
+    // Bring today's cell into view (horizontal scroll only) so it is
+    // visible on narrow screens without the person hunting for it.
+    const todayCell = grassContainer.querySelector(".grass-cell.is-today");
+    if (todayCell && !didScrollToToday) {
+      didScrollToToday = true;
+      const box = grassContainer;
+      box.scrollLeft = Math.max(0, todayCell.offsetLeft - box.clientWidth / 2);
+    }
   }
 
   async function loadTodaySummary() {
@@ -288,6 +301,7 @@
         const payload = await res.json();
         renderExistingSessions(payload.sessions);
         loadGrass();
+        refreshTodayEntry();
         loadTodaySummary();
       });
     });
@@ -327,12 +341,108 @@
     const payload = await dayRes.json();
     renderExistingSessions(payload.sessions);
     loadGrass();
+    refreshTodayEntry();
     loadTodaySummary();
+  });
+
+  // ---------- today quick entry ----------
+  const todayEntryDate = document.getElementById("today-entry-date");
+  const todayHeadingDate = document.getElementById("today-heading-date");
+  const todayActual = document.getElementById("today-entry-actual");
+  const todayTarget = document.getElementById("today-entry-target");
+  const todayUnit = document.getElementById("today-entry-unit");
+  const todayFill = document.getElementById("today-entry-fill");
+  const todayMinutes = document.getElementById("today-minutes");
+  const todayAddButton = document.getElementById("today-add");
+  const todayError = document.getElementById("today-entry-error");
+  const renderedToday = fmtDate(new Date());
+
+  // Server-side "today" is UTC; the browser's local date is what the
+  // person means by "today", so overwrite it here.
+  if (todayEntryDate) todayEntryDate.textContent = renderedToday;
+  if (todayHeadingDate) todayHeadingDate.textContent = renderedToday;
+
+  async function refreshTodayEntry() {
+    if (!todayActual || !currentGoalId) return;
+    const today = fmtDate(new Date());
+    const res = await fetch(`/api/grass?goalId=${encodeURIComponent(currentGoalId)}&start=${today}&end=${today}`);
+    if (!res.ok) return;
+    const payload = await res.json();
+    const cell = payload.cells[0];
+    todayActual.textContent = String(cell.actualMin);
+    todayTarget.textContent = String(cell.targetMin);
+    todayUnit.textContent = payload.goal.targetUnit || "min";
+    const pct = Math.min(100, Math.round(cell.intensity * 100));
+    todayFill.style.width = pct + "%";
+    todayFill.classList.toggle("is-done", cell.ratio >= 1);
+  }
+
+  function showTodayError(msg) {
+    todayError.textContent = msg;
+    todayError.hidden = false;
+  }
+
+  async function addTodayMinutes() {
+    todayError.hidden = true;
+    const minutes = Number(todayMinutes.value);
+    if (!todayMinutes.value || !Number.isFinite(minutes) || minutes <= 0) {
+      showTodayError("1以上の分数を入力してください。");
+      return;
+    }
+    if (!currentGoalId) return;
+    todayAddButton.disabled = true;
+    try {
+      const res = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date: fmtDate(new Date()),
+          durationMin: minutes,
+          subject: "",
+          goalId: currentGoalId,
+          description: "",
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showTodayError(err.error || "保存に失敗しました。");
+        return;
+      }
+      todayMinutes.value = "";
+      await Promise.all([loadGrass(), refreshTodayEntry(), loadTodaySummary()]);
+    } finally {
+      todayAddButton.disabled = false;
+    }
+  }
+
+  if (todayAddButton) {
+    todayAddButton.addEventListener("click", addTodayMinutes);
+    todayMinutes.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        addTodayMinutes();
+      }
+    });
+    document.querySelectorAll(".today-quick [data-add]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const cur = Number(todayMinutes.value) || 0;
+        todayMinutes.value = String(cur + Number(btn.dataset.add));
+        todayMinutes.focus();
+      });
+    });
+  }
+
+  // If the tab stays open past midnight, reload so "today" moves on.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && fmtDate(new Date()) !== renderedToday) {
+      location.reload();
+    }
   });
 
   goalSelect.addEventListener("change", () => {
     currentGoalId = goalSelect.value;
     loadGrass();
+    refreshTodayEntry();
   });
   yearSelect.addEventListener("change", () => {
     currentYear = Number(yearSelect.value);
@@ -344,7 +454,7 @@
     await loadGoals();
     if (goalSelect.options.length > 0) {
       currentGoalId = goalSelect.value;
-      await loadGrass();
+      await Promise.all([loadGrass(), refreshTodayEntry()]);
     }
     loadTodaySummary();
   })();
