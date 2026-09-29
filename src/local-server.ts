@@ -5,7 +5,7 @@
 //   npm run build && npm start
 //   open http://localhost:8080
 
-import { createApp } from "./app";
+import { createApp } from "./studylog-app";
 import { Store } from "./db";
 
 async function main(): Promise<void> {

@@ -8,8 +8,8 @@
   },
   "scripts": {
     "build": "tsc -p .",
-    "start": "node dist/src/server.js",
-    "dev": "tsc -p . && node dist/src/server.js",
+    "start": "node dist/src/local-server.js",
+    "dev": "tsc -p . && node dist/src/local-server.js",
     "test": "tsc -p . && node dist/test/run.js"
   },
   "dependencies": {
