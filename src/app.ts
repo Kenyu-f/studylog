@@ -202,7 +202,7 @@ export function createApp(store: Store): express.Express {
       const token = authutil.newSessionToken();
       await store.putToken(token, user.id);
       setSessionCookie(res, token);
-      res.redirect("/");
+      res.redirect(303, "/");
     })
   );
 
@@ -212,7 +212,7 @@ export function createApp(store: Store): express.Express {
       const token = parseCookies(req)[SESSION_COOKIE];
       if (token) await store.deleteToken(token);
       clearSessionCookie(res);
-      res.redirect("/login");
+      res.redirect(303, "/login");
     })
   );
 
